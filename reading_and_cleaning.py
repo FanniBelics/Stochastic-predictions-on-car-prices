@@ -22,6 +22,10 @@ title_statusMap = {
     "parts only": 6
 }
 
+luxury_brands = ["rolls-royce", "bentley", "lamborghini", "ferrari", "mclaren",\
+                "aston martin", "bugatti", "maserati", "porsche", "jaguar",\
+                    "cadillac", "infiniti", "acura", "lincoln"]
+
 
 def read_data():
     dataset = pd.read_csv(DATASET_PATH)
@@ -66,6 +70,21 @@ def clean_data(dataset: pd.DataFrame):
     dataset["model"] = dataset["model"].str.lower().str.strip().fillna("unknown")
     dataset["manufacturer"] = dataset["manufacturer"].str.lower().str.strip().fillna("unknown")
     
+    dataset["car_age"] = 2021 - dataset["year"]
+    
+    dataset["mileage_per_year"] = dataset["odometer"] / dataset["car_age"].replace(0, 1)
+    
+    dataset["luxury_brand"] = dataset["manufacturer"].apply(lambda x: 1 if x in luxury_brands else 0)
+    
+    dataset.drop(columns=["VIN"], inplace=True)
+    dataset.drop(columns=["url"], inplace=True)
+    dataset.drop(columns=["region_url"], inplace=True)
+    dataset.drop(columns=["lat"], inplace=True)
+    dataset.drop(columns=["long"], inplace=True)
+    dataset.drop(columns=["model"], inplace=True)
+    
+    
+    
     return dataset
 
 def read_car_types():
@@ -76,7 +95,7 @@ def read_car_types():
     
     car_model_dicts = car_types.groupby("Make")["Modle"].apply(lambda x: sorted(x.unique())).to_dict()
     
-    return car_model_dicts
+    return (car_model_dicts, car_types)
 
 def match_new_model(manufacturer: str, given_model: str, car_model_dicts: dict, confidence: int):
     choices = car_model_dicts.get(manufacturer, [])
@@ -109,13 +128,28 @@ def match_new_model(manufacturer: str, given_model: str, car_model_dicts: dict, 
 
     return "unknown"
     
+def find_cylinder_number(dataset: pd.DataFrame, car_types_dataset: pd.DataFrame):
+    car_types_dataset = car_types_dataset.rename(columns={"Make": "manufacturer", "Modle": "model_clean", "number_of_cylinders": "cylinders"})
+    car_types_dataset = car_types_dataset[["manufacturer", "model_clean", "cylinders"]].drop_duplicates()
     
+    lookup = (
+    car_types_dataset[["manufacturer","model_clean","cylinders"]]
+    .drop_duplicates()
+    .set_index(["manufacturer","model_clean"])["cylinders"]
+    .to_dict()
+    )   
+
+    keys = pd.Series(list(zip(dataset["manufacturer"], dataset["model_clean"])))
+    dataset["cylinders_fill"] = keys.map(lookup)
+
+    dataset["cylinders"] = dataset["cylinders"].fillna(dataset["cylinders_fill"])
+    dataset.drop(columns=["cylinders_fill"], inplace=True)
+        
+    return dataset
 
 def main():
     dataset = read_data()
-    dataset = clean_data(dataset)
-
-    car_types_dict = read_car_types()
+    car_types_dict, car_types = read_car_types()
     
     dataset["model_clean"] = dataset.apply(
         lambda row: match_new_model(
@@ -126,6 +160,11 @@ def main():
         ),
         axis = 1
     )
+    
+    dataset = clean_data(dataset)
+    dataset = find_cylinder_number(dataset, car_types)
+    
+    dataset[["price","car_age","odometer","mileage_per_year","cylinders","luxury_brand"]].corr()
     
     dataset.to_csv("../cleaned_vehicles.csv", index=False)
 
