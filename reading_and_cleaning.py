@@ -45,7 +45,7 @@ def clean_data(dataset: pd.DataFrame):
     dataset["title_status"] = dataset["title_status"].map(title_statusMap)
     
     #Check if VIN present
-    dataset["vin_present"] = dataset["VIN"].notnull().astype(bool)
+    dataset["vin_present"] = dataset["VIN"].notnull().astype(int)
     
     #Drop county
     dataset.drop(columns=["county"], inplace=True)
@@ -54,7 +54,8 @@ def clean_data(dataset: pd.DataFrame):
     dataset.dropna(subset=["price"], inplace=True)
     dataset = dataset[dataset["price"] > 0]
     
-    dataset["condition"] = dataset["condition"].fillna("unknown")
+    dataset["condition"] = dataset["condition"].fillna(0).astype(int)
+    dataset["title_status"] = dataset["title_status"].fillna(0).astype(int)
     dataset["fuel"] = dataset["fuel"].fillna("unknown")
     dataset["transmission"] = dataset["transmission"].fillna("unknown")
     
@@ -68,11 +69,15 @@ def clean_data(dataset: pd.DataFrame):
     dataset = dataset[(dataset["year"] > 1980) & (dataset["year"] <= 2026)]
     
     dataset["model"] = dataset["model"].str.lower().str.strip().fillna("unknown")
-    dataset["manufacturer"] = dataset["manufacturer"].str.lower().str.strip().fillna("unknown")
+    dataset["manufacturer"] = dataset["manufacturer"].str.lower().str.strip().dropna()
+    dataset["is_manufacturer_unknown"] = (dataset["manufacturer"] == "unknown").astype(int)
     
-    dataset["car_age"] = 2021 - dataset["year"]
+    dataset["car_age"] = 2026 - dataset["year"]
     
-    dataset["mileage_per_year"] = dataset["odometer"] / dataset["car_age"].replace(0, 1)
+    dataset = dataset[dataset["odometer"] >= 0]
+    dataset["mileage_per_year"] = dataset["odometer"] / dataset["car_age"]
+    dataset["mileage_per_year"] = dataset["mileage_per_year"].fillna(0)
+    dataset = dataset[dataset["mileage_per_year"] < 80000]
     
     dataset["luxury_brand"] = dataset["manufacturer"].apply(lambda x: 1 if x in luxury_brands else 0)
     
@@ -81,9 +86,7 @@ def clean_data(dataset: pd.DataFrame):
     dataset.drop(columns=["region_url"], inplace=True)
     dataset.drop(columns=["lat"], inplace=True)
     dataset.drop(columns=["long"], inplace=True)
-    dataset.drop(columns=["model"], inplace=True)
-    
-    
+    dataset.drop(columns=["model"], inplace=True)    
     
     return dataset
 
