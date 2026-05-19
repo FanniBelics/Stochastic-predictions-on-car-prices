@@ -12,6 +12,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 
+import joblib
+
 
 
 numeric_cols = [
@@ -139,18 +141,75 @@ def random_forest_pipeline():
     
     return model
 
+def random_forest_interval_pipeline(rf_model, sample, real_price):
+
+    # Preprocess sample
+    x_processed = rf_model.named_steps["preprocessor"].transform(sample)
+
+    # Get forest
+    forest = rf_model.named_steps["model"]
+
+    tree_predictions = []
+
+    # Predict with every tree
+    for tree in forest.estimators_:
+
+        pred_log = tree.predict(x_processed)
+
+        # Convert from log(price)
+        pred = np.expm1(pred_log)
+
+        tree_predictions.append(pred)
+
+    # Convert list -> numpy array
+    tree_predictions = np.array(tree_predictions).flatten()
+
+    # Average prediction
+    mean_pred = np.mean(tree_predictions)
+
+    # Prediction interval
+    lower_bound = np.percentile(tree_predictions, 5)
+    upper_bound = np.percentile(tree_predictions, 95)
+
+    # Convert real value from log(price)
+    real_price = np.expm1(real_price)
+
+    print("Prediction:")
+    print(f"Estimated price: ${mean_pred:,.0f}")
+
+    print("\nPrediction interval:")
+    print(f"${lower_bound:,.0f} - ${upper_bound:,.0f}")
+
+    print("\nReal price:")
+    print(f"${real_price:,.0f}\n\n")
+
+    return mean_pred, lower_bound, upper_bound
+    
+    
+    
+
 def main():
     dataset = read_data()
     
     split_data(dataset)
     
     #linear_regression_pipeline()
-    print("Random Forest:")
-    model = random_forest_pipeline()
-    feature_importance(model)
-    error_analysis(model)
     
-    #print(dataset.describe())
+    model = joblib.load("random_forest_model.pkl")
+    
+    for i in range(30):
+        sample_index = i
+
+        sample = x_test.iloc[[sample_index]]
+
+        real_price = y_test.iloc[sample_index]
+
+        random_forest_interval_pipeline(
+            model,
+            sample,
+            real_price)
+    
+    
     
 if __name__ == '__main__':
     main()
