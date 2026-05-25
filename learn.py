@@ -5,23 +5,30 @@ from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.impute import SimpleImputer
+
 
 #Models
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from sklearn.linear_model import BayesianRidge
+
+
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+
 
 import joblib
-
-
 
 numeric_cols = [
     "condition",
     "cylinders",
     "odometer",
     "car_age",
-    "mileage_per_year"
+    "mileage_per_year",
+    "days_listed"
 ]
 
 categorical_cols = [
@@ -34,13 +41,16 @@ categorical_cols = [
     "title_status",
     "vin_present",
     "model_clean",
-    "luxury_brand"
+    "luxury_brand",
+    "drive",
+    "transmission",
+    "size"    
 ]
 
 preprocessor = ColumnTransformer(
     transformers=[
         ("num", SimpleImputer(strategy="median"), numeric_cols),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols)
+        ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categorical_cols)
     ]
 )
 
@@ -54,8 +64,9 @@ def split_data(dataset: pd.DataFrame, test_size: float = 0.2, random_state: int 
     X = dataset.drop(columns=["price", "id","year"])
     y = np.log1p(dataset["price"])
 
-    global x_train, x_test, y_train, y_test
     x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+    
+    return x_train, x_test, y_train, y_test
     
 def feature_importance(model):
     rf = model.named_steps["model"]
@@ -73,7 +84,7 @@ def feature_importance(model):
     
     return feat_imp
 
-def error_analysis(rf_model):
+def error_analysis(rf_model, x_test, y_test):
     pred_log = rf_model.predict(x_test)
     pred = np.expm1(pred_log)
     y_test_real = np.expm1(y_test)
@@ -89,29 +100,46 @@ def error_analysis(rf_model):
     print(results.groupby(pd.cut(results["car_age"], bins=5))["error"].mean())
     return results
 
-def linear_regression_pipeline():
-    model = Pipeline ([
-        ("preprocessor", preprocessor),
-        ("model", LinearRegression())
-    ])
-    
-    model.fit(x_train, y_train)
-    
+def evaluate_model(model, x_test, y_test):
     pred_log = model.predict(x_test)
-    
     pred = np.expm1(pred_log)
-
     y_test_real = np.expm1(y_test)
 
     mae = mean_absolute_error(y_test_real, pred)
     rmse = np.sqrt(mean_squared_error(y_test_real, pred))
     r2 = r2_score(y_test_real, pred)
 
-    print("Linear Regression Performance:")
-    print(f"MAE: {mae}, RMSE: {rmse}, R²: {r2}")
+    print(f"MAE: {mae:.2f}")
+    print(f"RMSE: {rmse:.2f}")
+    print(f"R²: {r2:.4f}")
+
+def evaluate_predictions(pred, y_test):
+    y_test_real = np.expm1(y_test)
     
-def random_forest_pipeline():
-    print("Training Random Forest...")
+    mae = mean_absolute_error(y_test_real, pred)
+    rmse = np.sqrt(mean_squared_error(y_test_real, pred))
+    r2 = r2_score(y_test_real, pred)
+
+    print(f"MAE: {mae:.2f}")
+    print(f"RMSE: {rmse:.2f}")
+    print(f"R²: {r2:.4f}")
+
+def linear_regression_pipeline(x_train, y_train, x_test, y_test):
+    model = Pipeline ([
+        ("preprocessor", preprocessor),
+        ("model", LinearRegression())
+    ])
+    
+    print("Fitting Linear Regression...")
+    model.fit(x_train, y_train)
+
+    print("Evaluating Linear Regression...")
+    evaluate_model(model, x_test, y_test)
+    
+    return model
+    
+def random_forest_pipeline(x_train, y_train, x_test, y_test):
+    print("Fitting Random Forest...")
     model = Pipeline([
         ("preprocessor", preprocessor),
         ("model", RandomForestRegressor(
@@ -124,34 +152,19 @@ def random_forest_pipeline():
 
     model.fit(x_train, y_train)
 
-    pred_log = model.predict(x_test)
-    pred = np.expm1(pred_log)
-
-    y_test_real = np.expm1(y_test)
-
     print("Evaluating Random Forest...")
-    mae = mean_absolute_error(y_test_real, pred)
-    rmse = np.sqrt(mean_squared_error(y_test_real, pred))
-    r2 = r2_score(y_test_real, pred)
-
-    print("Random Forest Performance:")
-    print(f"MAE: {mae:.2f}")
-    print(f"RMSE: {rmse:.2f}")
-    print(f"R²: {r2:.4f}")
+    evaluate_model(model, x_test, y_test)
     
     return model
 
 def random_forest_interval_pipeline(rf_model, sample, real_price):
 
-    # Preprocess sample
     x_processed = rf_model.named_steps["preprocessor"].transform(sample)
 
-    # Get forest
     forest = rf_model.named_steps["model"]
 
     tree_predictions = []
 
-    # Predict with every tree
     for tree in forest.estimators_:
 
         pred_log = tree.predict(x_processed)
@@ -161,17 +174,12 @@ def random_forest_interval_pipeline(rf_model, sample, real_price):
 
         tree_predictions.append(pred)
 
-    # Convert list -> numpy array
     tree_predictions = np.array(tree_predictions).flatten()
 
-    # Average prediction
     mean_pred = np.mean(tree_predictions)
-
-    # Prediction interval
     lower_bound = np.percentile(tree_predictions, 5)
     upper_bound = np.percentile(tree_predictions, 95)
 
-    # Convert real value from log(price)
     real_price = np.expm1(real_price)
 
     print("Prediction:")
@@ -185,31 +193,158 @@ def random_forest_interval_pipeline(rf_model, sample, real_price):
 
     return mean_pred, lower_bound, upper_bound
     
+def xgboost_pipeline(x_train, y_train, x_test, y_test):
+    model = Pipeline([
+        ("preprocessor", preprocessor),
+        ("model", XGBRegressor(
+            n_estimators=2000,
+            max_depth=8,
+            learning_rate=0.03,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1,
+            verbosity=0,
+            early_stopping_rounds=50,
+        ))
+        ])
+    
+    model.named_steps["preprocessor"].fit(x_train)
+
+    x_test_transformed = model.named_steps["preprocessor"].transform(x_test)
+
+    model.fit(
+        x_train, y_train,
+        model__eval_set=[(x_test_transformed, y_test)],
+        model__verbose=100,
+    )
+    
+    print("Evaluating XGBoost...")
+    evaluate_model(model, x_test, y_test)
+    
+    return model
+    
+def bayesian_ridge_pipeline(x_train, y_train, x_test, y_test):
+    model = Pipeline([
+        ("preprocessor", preprocessor),
+        ("model", BayesianRidge())
+    ])
+    
+    print("Fitting Bayesian Ridge...")
+    model.fit(x_train, y_train)
+    
+    pred_mean, pred_std = model.named_steps["model"].predict(
+    model.named_steps["preprocessor"].transform(x_test),
+    return_std=True
+    )
+    
+    print("Evaluating Bayesian Ridge...")
+    evaluate_model(model, x_test, y_test)
+    
+    print("\nSample prediction 30 cars:")
+    lower = np.expm1(pred_mean - pred_std)
+    upper = np.expm1(pred_mean + pred_std)
+    price = np.expm1(pred_mean)
+    
+    for i in range(30):
+        print(f"Car {i+1}: ${price[i]:,.0f}  range: ${lower[i]:,.0f} – ${upper[i]:,.0f}  (actual: ${np.expm1(y_test.iloc[i]):,.0f})")    
     
     
+    return model
+
+def gaussian_process_pipeline(x_train, y_train, x_test, y_test):
+    x_train_sample = x_train[numeric_cols].sample(n=3000, random_state=42)
+    y_train_sample = y_train.loc[x_train_sample.index]
+    x_test_gp = x_test[numeric_cols]
+    
+    imputer = SimpleImputer(strategy="median")
+    x_train_processed = imputer.fit_transform(x_train_sample)
+    x_test_processed = imputer.transform(x_test_gp)
+    
+    kernel = RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e8)) + WhiteKernel(noise_level=1.0)
+    
+    gp = GaussianProcessRegressor(
+        kernel=kernel,
+        random_state=42,
+        n_restarts_optimizer=3
+    )
+    
+    print("Fitting Gaussian Process...")
+    gp = gp.fit(x_train_processed, y_train_sample)
+    
+    print("Getting predictions...")
+    pred_result = gp.predict(x_test_processed, return_std=True)
+    pred_mean = pred_result[0]
+    pred_std = pred_result[1]
+    
+    print("Evaluating Gaussian Process...")
+    evaluate_predictions(pred_mean, y_test)
+    
+    print("\nSample prediction 30 cars:")
+    lower = np.expm1(pred_mean - pred_std)
+    upper = np.expm1(pred_mean + pred_std)
+    price = np.expm1(pred_mean)
+    
+    for i in range(30):
+        print(f"Car {i+1}: ${price[i]:,.0f}  range: ${lower[i]:,.0f} – ${upper[i]:,.0f}  (actual: ${np.expm1(y_test.iloc[i]):,.0f})")    
+    
+    
+    return gp
+
+def quantile_regression_pipeline(x_train, y_train, x_test, y_test):
+    x_train_processed = preprocessor.fit_transform(x_train)
+    x_test_processed = preprocessor.transform(x_test)
+    
+    models = {}
+    
+    for alpha, name in [(0.1, "lower"), (0.5, "median"), (0.9, "upper")]:
+        print(f"Fitting {name} quantile model...")
+        models[name] = XGBRegressor(
+            objective="reg:quantileerror",
+            quantile_alpha=alpha,
+            n_estimators=500,
+            max_depth=6,
+            learning_rate=0.05,
+            n_jobs=-1,  
+            random_state=42
+        )
+        
+        models[name].fit(x_train_processed, y_train)
+    
+    
+    lower_model = models["lower"]
+    median_model = models["median"]
+    upper_model = models["upper"]
+    
+    print("Getting predictions...")
+    lower_pred_log = lower_model.predict(x_test_processed)
+    lower_pred = np.expm1(lower_pred_log)
+    
+    median_pred_log = median_model.predict(x_test_processed)
+    median_pred = np.expm1(median_pred_log)
+    
+    upper_pred_log = upper_model.predict(x_test_processed)
+    upper_pred = np.expm1(upper_pred_log)
+    
+    print("Evaluating Quantile Regression models...")
+    evaluate_predictions(median_pred, y_test)
+    
+    print("\nSample prediction 30 cars:")
+    for i in range(30):
+        print(f"Car {i+1}: ${median_pred[i]:,.0f}  range: ${lower_pred[i]:,.0f} – ${upper_pred[i]:,.0f}  (actual: ${np.expm1(y_test.iloc[i]):,.0f})")
+    
+    return lower_model, median_model, upper_model
 
 def main():
     dataset = read_data()
     
-    split_data(dataset)
-    
-    #linear_regression_pipeline()
-    
-    model = joblib.load("random_forest_model.pkl")
-    
-    for i in range(30):
-        sample_index = i
+    print("Splitting data...")
+    x_train, x_test, y_train, y_test = split_data(dataset)
 
-        sample = x_test.iloc[[sample_index]]
+    lo, med, up = quantile_regression_pipeline(x_train, y_train, x_test, y_test)
+    joblib.dump(lo, "quantile_regression_model_lower.joblib")
+    joblib.dump(med, "quantile_regression_model_median.joblib")
+    joblib.dump(up, "quantile_regression_model_upper.joblib")
 
-        real_price = y_test.iloc[sample_index]
-
-        random_forest_interval_pipeline(
-            model,
-            sample,
-            real_price)
-    
-    
-    
 if __name__ == '__main__':
     main()

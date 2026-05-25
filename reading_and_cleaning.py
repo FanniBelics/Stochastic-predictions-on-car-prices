@@ -81,12 +81,19 @@ def clean_data(dataset: pd.DataFrame):
     
     dataset["luxury_brand"] = dataset["manufacturer"].apply(lambda x: 1 if x in luxury_brands else 0)
     
+    dataset["days_listed"] = (
+    pd.Timestamp.now(tz="UTC") - pd.to_datetime(dataset["posting_date"], format="mixed", utc=True)).dt.days
+    
     dataset.drop(columns=["VIN"], inplace=True)
     dataset.drop(columns=["url"], inplace=True)
     dataset.drop(columns=["region_url"], inplace=True)
     dataset.drop(columns=["lat"], inplace=True)
     dataset.drop(columns=["long"], inplace=True)
-    dataset.drop(columns=["model"], inplace=True)    
+    dataset.drop(columns=["model"], inplace=True)
+    dataset.drop(columns=["image_url"], inplace=True)
+    dataset.drop(columns=["description"], inplace=True)
+    dataset.drop(columns=["posting_date"], inplace=True)
+
     
     return dataset
 
