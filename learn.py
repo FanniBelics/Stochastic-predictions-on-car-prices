@@ -7,6 +7,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split, KFold, cross_val_score
 
 
 #Models
@@ -61,12 +62,12 @@ def read_data():
 
 def split_data(dataset: pd.DataFrame, test_size: float = 0.2, random_state: int = 42):
     
-    X = dataset.drop(columns=["price", "id","year"])
+    x = dataset.drop(columns=["price", "id","year"])
     y = np.log1p(dataset["price"])
 
-    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=test_size, random_state=random_state)
     
-    return x_train, x_test, y_train, y_test
+    return x, y, x_train, x_test, y_train, y_test
     
 def feature_importance(model):
     rf = model.named_steps["model"]
@@ -124,6 +125,16 @@ def evaluate_predictions(pred, y_test):
     print(f"RMSE: {rmse:.2f}")
     print(f"R²: {r2:.4f}")
 
+def cross_validate_model(model, X, y, n_splits=3):
+    if hasattr(model.named_steps["model"], "early_stopping_rounds"):
+        model.named_steps["model"].early_stopping_rounds = None
+    
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    scores = cross_val_score(model, X, y, cv=kf, scoring="r2", n_jobs=-1)
+    
+    print(f"CV R²: {scores.mean():.4f} ± {scores.std():.4f}")
+    return scores
+
 def linear_regression_pipeline(x_train, y_train, x_test, y_test):
     model = Pipeline ([
         ("preprocessor", preprocessor),
@@ -138,13 +149,13 @@ def linear_regression_pipeline(x_train, y_train, x_test, y_test):
     
     return model
     
-def random_forest_pipeline(x_train, y_train, x_test, y_test):
+def random_forest_pipeline(x_train, y_train, x_test, y_test, x, y):
     print("Fitting Random Forest...")
     model = Pipeline([
         ("preprocessor", preprocessor),
         ("model", RandomForestRegressor(
             n_estimators=100,
-            max_depth = 20,
+            max_depth = 10,
             random_state=42,
             n_jobs=-1
         ))
@@ -154,6 +165,9 @@ def random_forest_pipeline(x_train, y_train, x_test, y_test):
 
     print("Evaluating Random Forest...")
     evaluate_model(model, x_test, y_test)
+    
+    print("Cross-validating Random Forest...")
+    cross_validate_model(model, x, y,  n_splits=3)
     
     return model
 
@@ -193,11 +207,11 @@ def random_forest_interval_pipeline(rf_model, sample, real_price):
 
     return mean_pred, lower_bound, upper_bound
     
-def xgboost_pipeline(x_train, y_train, x_test, y_test):
+def xgboost_pipeline(x_train, y_train, x_test, y_test, x, y):
     model = Pipeline([
         ("preprocessor", preprocessor),
         ("model", XGBRegressor(
-            n_estimators=2000,
+            n_estimators=1000,
             max_depth=8,
             learning_rate=0.03,
             subsample=0.8,
@@ -221,6 +235,9 @@ def xgboost_pipeline(x_train, y_train, x_test, y_test):
     
     print("Evaluating XGBoost...")
     evaluate_model(model, x_test, y_test)
+    
+    print("Cross-validating XGBoost...")
+    cross_validate_model(model, x, y, n_splits=3)
     
     return model
     
@@ -339,12 +356,17 @@ def main():
     dataset = read_data()
     
     print("Splitting data...")
-    x_train, x_test, y_train, y_test = split_data(dataset)
+    x, y, x_train, x_test, y_train, y_test = split_data(dataset)
 
-    lo, med, up = quantile_regression_pipeline(x_train, y_train, x_test, y_test)
-    joblib.dump(lo, "quantile_regression_model_lower.joblib")
-    joblib.dump(med, "quantile_regression_model_median.joblib")
-    joblib.dump(up, "quantile_regression_model_upper.joblib")
+    print("Running Random Forest pipeline...")
+    rf_model = random_forest_pipeline(x_train, y_train, x_test, y_test, x, y)
+    
+    print("Running XGBoost pipeline...")
+    xgb_model = xgboost_pipeline(x_train, y_train, x_test, y_test, x, y)
+    
+    print("Saving models...")
 
+    joblib.dump(rf_model, "random_forest_model_folded.joblib")
+    joblib.dump(xgb_model, "xgboost_model_folded.joblib")
 if __name__ == '__main__':
     main()
