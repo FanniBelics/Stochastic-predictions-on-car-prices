@@ -219,3 +219,4 @@ __marimo__/
 
 # Models
 models/*
+.vscode
