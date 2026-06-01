@@ -1,8 +1,16 @@
 import json
-import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+custom_colors = [
+    "#1B2A4A",  # dark navy blue — actual prices
+    "#C9A84C",  # beige gold
+    "#2E4A7A",  # medium blue
+    "#E8C97A",  # light gold
+    "#3D6B9E",  # steel blue
+    "#A07830",  # dark gold/bronze
+    "#6B9BC4",  # pale blue
+]
 
 def main():
     with open("model_results.json", "r") as f:
@@ -18,9 +26,10 @@ def main():
         ["scatter", "scatter", "scatter"]
     ])
     
+    plt.suptitle("Used Car Price Prediction — Model Comparison", fontsize=14, y=1.01)
 
     model_r2 = [models[name]["r2"] for name in model_names]
-    sns.barplot(x=model_names, y=model_r2, ax=axes["r2"], palette="viridis")
+    sns.barplot(x=model_names, y=model_r2, ax=axes["r2"], palette=custom_colors)
     axes["r2"].set_title("R² by model")
     axes["r2"].set_ylabel("R²")
     axes["r2"].set_xticklabels(model_names, rotation=20)
@@ -29,7 +38,7 @@ def main():
     axes["r2"].legend()
     
     model_mae = [models[name]["mae"] for name in model_names]
-    sns.barplot(x=model_names, y=model_mae, ax=axes["mae"], palette="viridis")
+    sns.barplot(x=model_names, y=model_mae, ax=axes["mae"], palette=custom_colors)
     axes["mae"].set_title("MAE by model")
     axes["mae"].set_ylabel("MAE")
     axes["mae"].set_xticklabels(model_names, rotation=20)
@@ -38,7 +47,7 @@ def main():
     axes["mae"].legend()
     
     model_rmse = [models[name]["rmse"] for name in model_names]
-    sns.barplot(x=model_names, y=model_rmse, ax=axes["rmse"], palette="viridis")
+    sns.barplot(x=model_names, y=model_rmse, ax=axes["rmse"], palette=custom_colors)
     axes["rmse"].set_title("RMSE by model")
     axes["rmse"].set_ylabel("RMSE")
     axes["rmse"].set_xticklabels(model_names, rotation=20)
@@ -46,19 +55,24 @@ def main():
     axes["rmse"].axhline(y=max(model_rmse), color="gray", linewidth=0.8, linestyle=":", label=f"${max(model_rmse):.2f}$")
     axes["rmse"].legend()
     
-    axes["scatter"].plot(range(len(actual_prices)), actual_prices, '-', linewidth=2, label="Actual car prices", zorder=5)
+    ####### Scatter plot of predictions vs actual prices
+    axes["scatter"].plot(range(len(actual_prices)), 
+                         actual_prices, '-', 
+                         linewidth=2,
+                         color="navy", 
+                         label="Actual car prices", zorder=5)
     #colors = plt.cm.viridis(np.linspace(0, 1, len(model_names)))
-    colors = [plt.cm.tab10(i) for i in range(len(model_names))]
+    #colors = [plt.cm.tab10(i) for i in range(len(model_names))]
     
     for i, name in enumerate(model_names):
         preds = models[name]["predictions"]
         lower = models[name]["lower_bound"]
         upper = models[name]["upper_bound"]
         axes["scatter"].plot(range(len(preds)), preds,
-                            color=colors[i], linewidth=1, label=name)
+                            color=custom_colors[i], linewidth=1, label=name)
         if lower and upper:
             axes["scatter"].fill_between(range(len(preds)), lower, upper,
-                                        color=colors[i], alpha=0.15)
+                                        color=custom_colors[i], alpha=0.15)
             
     axes["scatter"].set_title(f"Predicted vs Actual prices — {len(actual_prices)} sample cars")
     axes["scatter"].set_xlabel("Car index")
@@ -69,12 +83,12 @@ def main():
     axes["scatter"].set_xticks(range(len(actual_prices)))
     axes["scatter"].xaxis.grid(True, linestyle=':', linewidth=0.5, alpha=0.5)
     axes["scatter"].set_axisbelow(True)
-
-    
+    axes["scatter"].grid(axis='x', linestyle=':', linewidth=0.5, alpha=0.5)
+    axes["scatter"].set_axisbelow(True)
     
     plt.tight_layout(pad=2.0)
     plt.savefig("model_comparison.png", bbox_inches="tight")
-
+    plt.savefig("dashboard.pdf", bbox_inches="tight", dpi=300)
 
     plt.show()
 

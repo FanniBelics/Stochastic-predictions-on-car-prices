@@ -1,5 +1,4 @@
 import pandas as pd
-import seaborn as seaborn
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
@@ -149,7 +148,7 @@ def save_model_results(x_train, y_train, x_test, y_test, *models: list[callable]
     if not os.path.exists(MODELS_DIR):
         os.makedirs(MODELS_DIR)
         
-    sample_cars = x_test.sample(n=30, random_state=42)
+    sample_cars = x_test.sample(n=100, random_state=42)
     sample_prices = y_test.loc[sample_cars.index]    
     
     result_dir = {}
